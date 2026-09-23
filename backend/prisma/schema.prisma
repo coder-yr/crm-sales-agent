@@ -1,0 +1,444 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Tenant {
+  id                String                  @id @default(uuid())
+  name              String
+  slug              String?                 @unique
+  supportEmail      String?
+  officialPhone     String?
+  logo              String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+  deletedAt         DateTime?
+  aiAgentRuns       AIAgentRun[]
+  aiRecommendations AIRecommendation[]
+  aiOutreachDrafts  AIOutreachDraft[]
+  activities        Activity[]
+  channelPartners   ChannelPartner[]
+  companies         Company[]
+  companySignals    CompanySignal[]
+  contacts          Contact[]
+  dealIntelligences DealIntelligence[]
+  leads             Lead[]
+  assignmentHistory LeadAssignmentHistory[]
+  notifications     Notification[]
+  pipelineStages    PipelineStage[]
+  properties        Property[]
+  subscriptions     Subscription[]
+  tasks             Task[]
+  users             User[]
+  invites           UserInvite[]
+
+  @@index([deletedAt])
+}
+
+model User {
+  id            String                  @id @default(uuid())
+  tenantId      String
+  email         String                  @unique
+  passwordHash  String?
+  firstName     String
+  lastName      String
+  title         String?
+  role          Role                    @default(EMPLOYEE)
+  status        UserStatus              @default(INVITED)
+  permissions   Json?
+  refreshToken  String?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  deletedAt     DateTime?
+  activities    Activity[]
+  leadsAssigned Lead[]                  @relation("LeadAssignee")
+  leadsCreated  Lead[]                  @relation("LeadCreator")
+  assignments   LeadAssignmentHistory[]
+  notifications Notification[]
+  tasks         Task[]
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([email])
+}
+
+model UserInvite {
+  id        String   @id @default(uuid())
+  email     String
+  token     String   @unique
+  role      Role
+  title     String?
+  tenantId  String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([token])
+}
+
+model PipelineStage {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  order     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  leads     Lead[]
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Lead {
+  id                 String                  @id @default(uuid())
+  tenantId           String
+  firstName          String
+  lastName           String
+  email              String?
+  phone              String?
+  source             String?
+  notes              String?
+  budget             Float?                  @default(0)
+  interestedProperty String?
+  preapprovalStatus  String?
+  expectedCloseDate  DateTime?
+  location           String?
+  stageId            String
+  creatorId          String
+  assigneeId         String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  deletedAt          DateTime?
+  version            Int                     @default(1)
+  companyId          String?
+  aiRecommendations  AIRecommendation[]
+  aiOutreachDrafts   AIOutreachDraft[]
+  activities         Activity[]
+  dealIntelligence   DealIntelligence?
+  assignee           User?                   @relation("LeadAssignee", fields: [assigneeId], references: [id])
+  company            Company?                @relation(fields: [companyId], references: [id])
+  creator            User                    @relation("LeadCreator", fields: [creatorId], references: [id])
+  stage              PipelineStage           @relation(fields: [stageId], references: [id])
+  tenant             Tenant                  @relation(fields: [tenantId], references: [id])
+  assignmentHistory  LeadAssignmentHistory[]
+  tasks              Task[]
+
+  @@index([tenantId])
+  @@index([stageId])
+  @@index([assigneeId])
+  @@index([companyId])
+}
+
+model Task {
+  id          String    @id @default(uuid())
+  tenantId    String
+  leadId      String
+  userId      String
+  title       String
+  description String?
+  dueDate     DateTime
+  isCompleted Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  lead        Lead      @relation(fields: [leadId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+  recommendations AIRecommendation[]
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([userId])
+}
+
+model Activity {
+  id        String   @id @default(uuid())
+  tenantId  String
+  leadId    String
+  userId    String
+  type      String
+  metadata  Json?
+  createdAt DateTime @default(now())
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([leadId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model Subscription {
+  id        String    @id @default(uuid())
+  tenantId  String
+  plan      String
+  status    String
+  startDate DateTime
+  endDate   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model LeadAssignmentHistory {
+  id         String   @id @default(uuid())
+  tenantId   String
+  leadId     String
+  userId     String
+  assignedAt DateTime @default(now())
+  lead       Lead     @relation(fields: [leadId], references: [id])
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([leadId])
+}
+
+model ChannelPartner {
+  id             String    @id @default(uuid())
+  tenantId       String
+  name           String
+  contactInfo    String?
+  primaryContact String?
+  activeAgents   Int       @default(0)
+  commissionRate Float     @default(2.5)
+  totalSales     Float     @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+  tenant         Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model Property {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  price       Float
+  location    String
+  type        String
+  sqft        Int
+  bedrooms    Int       @default(0)
+  bathrooms   Int       @default(0)
+  yearBuilt   Int?
+  status      String    @default("Available")
+  images      String[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  version     Int       @default(1)
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([deletedAt])
+}
+
+model Company {
+  id            String          @id @default(uuid())
+  tenantId      String
+  name          String
+  domain        String?
+  industry      String?
+  description   String?
+  location      String?
+  employeeCount Int?
+  revenue       Float?
+  foundedYear   Int?
+  websiteUrl    String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  signals       CompanySignal[]
+  contacts      Contact[]
+  leads         Lead[]
+
+  @@index([tenantId])
+}
+
+model Contact {
+  id                 String   @id @default(uuid())
+  tenantId           String
+  companyId          String
+  firstName          String
+  lastName           String
+  email              String?
+  phone              String?
+  title              String?
+  department         String?
+  seniority          String?
+  decisionMakerScore Float?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  company            Company  @relation(fields: [companyId], references: [id])
+  tenant             Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([companyId])
+}
+
+model CompanySignal {
+  id          String   @id @default(uuid())
+  tenantId    String
+  companyId   String
+  type        String
+  title       String
+  description String?
+  strength    Float
+  confidence  Float
+  source      String
+  sourceUrl   String?
+  detectedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  evidence    String?
+  fingerprint String?
+  metadata    Json?
+  company     Company  @relation(fields: [companyId], references: [id])
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([tenantId, companyId, fingerprint])
+}
+
+model DealIntelligence {
+  id              String   @id @default(uuid())
+  tenantId        String
+  leadId          String   @unique
+  dealScore       Float
+  intentScore     Float
+  companyFitScore Float?
+  contactFitScore Float?
+  engagementScore Float?
+  healthScore     String
+  dealHealth      String?
+  riskScore       Float
+  buyingStage     String?
+  urgency         String?
+  reasons         Json?
+  recommendations Json?
+  lastAnalyzedAt  DateTime @default(now())
+  modelVersion    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  lead            Lead     @relation(fields: [leadId], references: [id])
+  tenant          Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, leadId])
+  @@index([tenantId])
+  @@index([tenantId, dealScore])
+  @@index([tenantId, healthScore])
+  @@index([tenantId, lastAnalyzedAt])
+}
+
+model AIRecommendation {
+  id         String    @id @default(uuid())
+  tenantId   String
+  leadId     String
+  ruleKey    String?
+  type       String
+  title      String
+  reason     String?
+  priority   String
+  action     String
+  status     String    @default("PENDING")
+  evidence   Json?
+  version    String?   @default("v1")
+  taskId     String?
+  createdAt  DateTime  @default(now())
+  executedAt DateTime?
+  lead       Lead      @relation(fields: [leadId], references: [id])
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+  task       Task?     @relation(fields: [taskId], references: [id])
+  outreachDrafts AIOutreachDraft[]
+
+  @@index([tenantId])
+  @@index([leadId])
+  @@index([tenantId, leadId, ruleKey, status])
+}
+
+model AIOutreachDraft {
+  id                   String            @id @default(uuid())
+  tenantId             String
+  leadId               String
+  recommendationId     String?
+  type                 String
+  status               String            @default("DRAFT")
+  subject              String
+  body                 String
+  tone                 String?           @default("PROFESSIONAL")
+  personalizationPoints Json?
+  usedEvidence         Json?
+  evidenceSnapshot     Json?
+  model                String?
+  modelVersion         String?           @default("v1")
+  generatedAt          DateTime          @default(now())
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  tenant               Tenant            @relation(fields: [tenantId], references: [id])
+  lead                 Lead              @relation(fields: [leadId], references: [id])
+  recommendation       AIRecommendation? @relation(fields: [recommendationId], references: [id])
+
+  @@index([tenantId, leadId])
+  @@index([tenantId, recommendationId])
+}
+
+model AIAgentRun {
+  id           String    @id @default(uuid())
+  tenantId     String
+  agentType    String
+  entityType   String
+  entityId     String
+  status       String    @default("STARTED")
+  input        Json?
+  output       Json?
+  model        String?
+  error        String?
+  startedAt    DateTime  @default(now())
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  durationMs   Int?
+  modelVersion String?
+  tenant       Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  EMPLOYEE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  INVITED
+}
