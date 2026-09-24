@@ -10,6 +10,7 @@ import { EventsModule } from '../../../events/events.module';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { NotFoundException } from '@nestjs/common';
+import { LLMModule } from '../../llm/llm.module';
 
 describe('Outreach Agent Real Database Integration', () => {
   jest.setTimeout(45000);
@@ -35,6 +36,7 @@ describe('Outreach Agent Real Database Integration', () => {
         EventEmitterModule.forRoot(),
         PrismaModule,
         EventsModule,
+        LLMModule,
       ],
       providers: [
         OutreachContextBuilderService,

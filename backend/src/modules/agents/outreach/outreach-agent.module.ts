@@ -6,8 +6,10 @@ import { OutreachContextBuilderService } from './outreach-context-builder.servic
 import { OutreachHallucinationGuardService } from './outreach-hallucination-guard.service';
 import { OutreachAgentService } from './outreach-agent.service';
 
+import { LLMModule } from '../../llm/llm.module';
+
 @Module({
-  imports: [PrismaModule, ConfigModule, EventsModule],
+  imports: [PrismaModule, ConfigModule, EventsModule, LLMModule],
   providers: [
     OutreachContextBuilderService,
     OutreachHallucinationGuardService,

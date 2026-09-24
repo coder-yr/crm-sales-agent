@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { EventsGateway } from '../../../events/events.gateway';
-import * as http from 'http';
+import { LLMService } from '../../llm/llm.service';
 import { OutreachContextBuilderService } from './outreach-context-builder.service';
 import { OutreachHallucinationGuardService } from './outreach-hallucination-guard.service';
 import { OutreachLlmOutput } from './outreach.types';
@@ -16,7 +16,8 @@ export class OutreachAgentService {
     private readonly configService: ConfigService,
     private readonly contextBuilder: OutreachContextBuilderService,
     private readonly hallucinationGuard: OutreachHallucinationGuardService,
-    private readonly eventsGateway: EventsGateway
+    private readonly eventsGateway: EventsGateway,
+    private readonly llmService: LLMService
   ) {}
 
   async execute(
@@ -81,37 +82,32 @@ export class OutreachAgentService {
       const prompt = this.contextBuilder.buildPrompt(context);
 
       // 3. Attempt LLM generation
-      const configuredModel =
-        this.configService.get<string>('AI_RESEARCH_MODEL') ||
-        process.env.AI_RESEARCH_MODEL ||
-        'qwen2.5:3b';
-      const ollamaUrl =
-        this.configService.get<string>('OLLAMA_BASE_URL') ||
-        process.env.OLLAMA_BASE_URL ||
-        'http://127.0.0.1:11434';
-
       let llmOutput: OutreachLlmOutput | null = null;
       let modelUsed = 'deterministic-template-v1';
       let isFallback = true;
 
       try {
-        const isUp = await this.checkOllamaReachable(ollamaUrl);
-        if (isUp) {
-          this.logger.log(`Querying Ollama (${configuredModel}) for outreach generation...`);
-          const rawResponse = await this.queryOllama(ollamaUrl, configuredModel, prompt);
-          if (rawResponse) {
-            const validation = this.hallucinationGuard.validateLlmOutput(rawResponse, context);
-            if (validation.isValid && validation.cleanedOutput) {
-              llmOutput = validation.cleanedOutput;
-              modelUsed = configuredModel;
-              isFallback = false;
-              this.logger.log(`LLM draft passed schema & hallucination guard!`);
-            } else {
-              this.logger.warn(`LLM output rejected by hallucination guard: ${validation.reason}. Using fallback template.`);
-            }
+        this.logger.log(`Querying LLM Service for outreach generation...`);
+        const result = await this.llmService.generate({
+          model: 'llama3-70b-8192', // Default Groq model
+          userPrompt: prompt,
+          jsonMode: true,
+          temperature: 0.3,
+          timeoutMs: 30000,
+        });
+
+        if (result.content) {
+          const validation = this.hallucinationGuard.validateLlmOutput(result.content, context);
+          if (validation.isValid && validation.cleanedOutput) {
+            llmOutput = validation.cleanedOutput;
+            modelUsed = result.modelUsed;
+            isFallback = false;
+            this.logger.log(`LLM draft passed schema & hallucination guard!`);
+          } else {
+            this.logger.warn(`LLM output rejected by hallucination guard: ${validation.reason}. Using fallback template.`);
           }
         } else {
-          this.logger.log(`Ollama offline at ${ollamaUrl}. Using high-converting deterministic template.`);
+          this.logger.warn(`LLM service returned no content. Using fallback template.`);
         }
       } catch (err: any) {
         this.logger.warn(`Error during LLM generation: ${err.message}. Using deterministic template.`);
@@ -226,82 +222,5 @@ export class OutreachAgentService {
 
       throw err;
     }
-  }
-
-  private queryOllama(baseUrl: string, model: string, prompt: string): Promise<string | null> {
-    return new Promise((resolve) => {
-      try {
-        const url = new URL('/api/generate', baseUrl);
-        const payload = JSON.stringify({
-          model,
-          prompt,
-          stream: false,
-          format: 'json',
-          options: {
-            temperature: 0.3,
-            top_p: 0.9,
-          },
-        });
-
-        const req = http.request(
-          url,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Content-Length': Buffer.byteLength(payload),
-            },
-            timeout: 25000,
-          },
-          (res) => {
-            let data = '';
-            res.on('data', (chunk) => (data += chunk));
-            res.on('end', () => {
-              if (res.statusCode === 200) {
-                try {
-                  const parsed = JSON.parse(data);
-                  resolve(parsed.response || null);
-                } catch {
-                  resolve(null);
-                }
-              } else {
-                resolve(null);
-              }
-            });
-          }
-        );
-
-        req.on('error', () => resolve(null));
-        req.on('timeout', () => {
-          req.destroy();
-          resolve(null);
-        });
-
-        req.write(payload);
-        req.end();
-      } catch {
-        resolve(null);
-      }
-    });
-  }
-
-  private checkOllamaReachable(baseUrl: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      try {
-        const url = new URL('/api/tags', baseUrl);
-        const req = http.request(url, { method: 'GET', timeout: 3000 }, (res) => {
-          res.resume();
-          resolve(res.statusCode === 200);
-        });
-        req.on('error', () => resolve(false));
-        req.on('timeout', () => {
-          req.destroy();
-          resolve(false);
-        });
-        req.end();
-      } catch {
-        resolve(false);
-      }
-    });
   }
 }

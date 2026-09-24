@@ -4,12 +4,16 @@ import { CombinedResearchContext } from './html-extractor.service';
 describe('ResearchExtractorService', () => {
   let service: ResearchExtractorService;
   let mockConfigService: any;
+  let mockLlmService: any;
 
   beforeEach(() => {
     mockConfigService = {
       get: jest.fn(),
     };
-    service = new ResearchExtractorService(mockConfigService);
+    mockLlmService = {
+      generate: jest.fn(),
+    };
+    service = new ResearchExtractorService(mockConfigService, mockLlmService);
   });
 
   describe('deterministicExtraction', () => {

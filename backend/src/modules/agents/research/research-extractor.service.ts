@@ -2,13 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CompanyResearchResult, BusinessSignalItem, ResearchSourceItem } from './research.types';
 import { CombinedResearchContext, ExtractedPageData } from './html-extractor.service';
-import * as http from 'http';
+import { LLMService } from '../../llm/llm.service';
 
 @Injectable()
 export class ResearchExtractorService {
   private readonly logger = new Logger(ResearchExtractorService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly llmService: LLMService,
+  ) {}
 
   /**
    * Primary entrypoint: Analyzes the sanitized research context
@@ -20,33 +23,21 @@ export class ResearchExtractorService {
     domain: string,
     context: CombinedResearchContext
   ): Promise<{ result: CompanyResearchResult; modelUsed: string; modelVersion: string }> {
-    const configuredModel =
-      this.configService.get<string>('AI_RESEARCH_MODEL') ||
-      process.env.AI_RESEARCH_MODEL ||
-      'qwen2.5:3b';
-    const ollamaUrl =
-      this.configService.get<string>('OLLAMA_BASE_URL') ||
-      process.env.OLLAMA_BASE_URL ||
-      'http://127.0.0.1:11434';
-
-    // 1. Attempt AI extraction via Ollama if available
+    // 1. Attempt AI extraction via LLMService
     try {
-      const isOllamaUp = await this.checkOllamaReachable(ollamaUrl);
-      if (isOllamaUp) {
-        this.logger.log(`Ollama detected at ${ollamaUrl}. Attempting AI extraction with model ${configuredModel}...`);
-        const aiResult = await this.queryOllamaWithRetry(ollamaUrl, configuredModel, companyName, domain, context);
-        if (aiResult) {
-          return {
-            result: aiResult,
-            modelUsed: configuredModel,
-            modelVersion: 'ollama-1.0',
-          };
-        }
+      this.logger.log(`Attempting AI extraction for ${companyName}...`);
+      const aiResult = await this.queryLLMWithRetry(companyName, domain, context);
+      if (aiResult) {
+        return {
+          result: aiResult.result,
+          modelUsed: aiResult.modelUsed,
+          modelVersion: aiResult.providerUsed + '-1.0',
+        };
       } else {
-        this.logger.warn(`Ollama service at ${ollamaUrl} is not responding. Falling back to deterministic extraction.`);
+        this.logger.warn(`LLM service returned no result. Falling back to deterministic extraction.`);
       }
     } catch (err: any) {
-      this.logger.warn(`AI model extraction unavailable or failed: ${err.message}. Falling back to deterministic extraction.`);
+      this.logger.warn(`AI model extraction failed: ${err.message}. Falling back to deterministic extraction.`);
     }
 
     // 2. Deterministic rule-based extraction fallback
@@ -127,15 +118,13 @@ export class ResearchExtractorService {
   }
 
   /**
-   * Queries Ollama with prompt injection quarantine and 1-time schema repair.
+   * Queries LLM Service with prompt injection quarantine and 1-time schema repair.
    */
-  private async queryOllamaWithRetry(
-    baseUrl: string,
-    model: string,
+  private async queryLLMWithRetry(
     companyName: string,
     domain: string,
     context: CombinedResearchContext
-  ): Promise<CompanyResearchResult | null> {
+  ): Promise<{ result: CompanyResearchResult; providerUsed: string; modelUsed: string } | null> {
     const systemPrompt = `You are a strict data extraction AI for sales intelligence.
 You extract ONLY verified factual data from the provided company website text.
 CRITICAL SECURITY REQUIREMENT:
@@ -185,57 +174,41 @@ ${context.boundedTextContent}
 
 Output JSON only:`;
 
-    const rawResponse = await this.callOllamaApi(baseUrl, model, systemPrompt, userPrompt);
+    const { content: rawResponse, providerUsed, modelUsed } = await this.llmService.generate({
+      model: 'llama3-70b-8192', // Default to Groq's high-capacity model
+      systemPrompt,
+      userPrompt,
+      jsonMode: true,
+      timeoutMs: 120000,
+    });
+
+    if (!rawResponse) return null;
+
     const parsed = this.parseAndValidateJson(rawResponse, domain);
 
-    if (parsed) return parsed;
+    if (parsed) return { result: parsed, providerUsed, modelUsed };
 
     // Retry once with repair prompt
-    this.logger.warn('Initial Ollama response was invalid JSON. Retrying with schema repair prompt...');
+    this.logger.warn('Initial LLM response was invalid JSON. Retrying with schema repair prompt...');
     const repairPrompt = `Your previous output was not valid JSON or failed schema validation.
 Fix it and output ONLY valid JSON matching the schema for company '${companyName}' (${domain}).
 Previous response:
 ${rawResponse.slice(0, 1000)}`;
 
-    const repairResponse = await this.callOllamaApi(baseUrl, model, systemPrompt, repairPrompt);
-    return this.parseAndValidateJson(repairResponse, domain);
-  }
-
-  private callOllamaApi(baseUrl: string, model: string, system: string, prompt: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const url = new URL('/api/generate', baseUrl);
-      const req = http.request(
-        url,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 120000,
-        },
-        (res) => {
-          let data = '';
-          res.on('data', (chunk) => (data += chunk));
-          res.on('end', () => {
-            try {
-              // Ollama returns newline-delimited JSON stream or single JSON if stream=false
-              const lines = data.split('\n').filter((l) => l.trim().length > 0);
-              let fullResponse = '';
-              for (const line of lines) {
-                const parsed = JSON.parse(line);
-                if (parsed.response) fullResponse += parsed.response;
-              }
-              resolve(fullResponse);
-            } catch {
-              resolve(data);
-            }
-          });
-        }
-      );
-
-      req.on('timeout', () => req.destroy(new Error('Ollama request timed out after 120s')));
-      req.on('error', (err) => reject(err));
-      req.write(JSON.stringify({ model, system, prompt, stream: false, format: 'json' }));
-      req.end();
+    const { content: repairResponse, providerUsed: retryProvider, modelUsed: retryModel } = await this.llmService.generate({
+      model: modelUsed, // Re-use the model from the first attempt
+      systemPrompt,
+      userPrompt: repairPrompt,
+      jsonMode: true,
+      timeoutMs: 120000,
     });
+    
+    if (!repairResponse) return null;
+
+    const retryParsed = this.parseAndValidateJson(repairResponse, domain);
+    if (retryParsed) return { result: retryParsed, providerUsed: retryProvider, modelUsed: retryModel };
+    
+    return null;
   }
 
   private parseAndValidateJson(raw: string, domain: string): CompanyResearchResult | null {
@@ -270,26 +243,6 @@ ${rawResponse.slice(0, 1000)}`;
     } catch {
       return null;
     }
-  }
-
-  private checkOllamaReachable(baseUrl: string): Promise<boolean> {
-    return new Promise((resolve) => {
-      try {
-        const url = new URL('/api/tags', baseUrl);
-        const req = http.request(url, { method: 'GET', timeout: 3000 }, (res) => {
-          res.resume();
-          resolve(res.statusCode === 200);
-        });
-        req.on('error', () => resolve(false));
-        req.on('timeout', () => {
-          req.destroy();
-          resolve(false);
-        });
-        req.end();
-      } catch {
-        resolve(false);
-      }
-    });
   }
 
   // --- Deterministic Extraction Helpers ---

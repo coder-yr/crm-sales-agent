@@ -135,18 +135,18 @@ export const NextBestActionCard: React.FC<NextBestActionCardProps> = ({
       }
     };
 
-    socket.on('agent:queued', handleAgentQueued);
-    socket.on('agent:started', handleAgentStarted);
-    socket.on('agent:progress', handleAgentProgress);
-    socket.on('agent:completed', handleAgentCompleted);
-    socket.on('agent:failed', handleAgentFailed);
+    socket.on('ai.agent.queued', handleAgentQueued);
+    socket.on('ai.agent.started', handleAgentStarted);
+    socket.on('ai.agent.progress', handleAgentProgress);
+    socket.on('ai.agent.completed', handleAgentCompleted);
+    socket.on('ai.agent.failed', handleAgentFailed);
 
     return () => {
-      socket.off('agent:queued', handleAgentQueued);
-      socket.off('agent:started', handleAgentStarted);
-      socket.off('agent:progress', handleAgentProgress);
-      socket.off('agent:completed', handleAgentCompleted);
-      socket.off('agent:failed', handleAgentFailed);
+      socket.off('ai.agent.queued', handleAgentQueued);
+      socket.off('ai.agent.started', handleAgentStarted);
+      socket.off('ai.agent.progress', handleAgentProgress);
+      socket.off('ai.agent.completed', handleAgentCompleted);
+      socket.off('ai.agent.failed', handleAgentFailed);
     };
   }, [leadId, fetchRecommendations]);
 
