@@ -33,7 +33,7 @@ export class ActivitiesController {
   ) {
     // Return empty array for now or fetch all tenant activities if needed
     // Since activities.service doesn't have findAll, we'll just return an empty array to fix the 404
-    return { success: true, activities: [], total: 0, message: 'Activities fetched successfully' };
+    return { success: true, data: [], total: 0, message: 'Activities fetched successfully' };
   }
 
   @Get('lead/:leadId')

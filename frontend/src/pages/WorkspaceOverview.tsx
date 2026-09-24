@@ -110,7 +110,7 @@ export const WorkspaceOverview: React.FC = () => {
 
   // Computed Recent Activities
   const recentActivities = useMemo(() => {
-    return activities.map(act => {
+    return (activities || []).map(act => {
       let icon = 'notifications';
       let iconBg = '#f1f5f9';
       let iconColor = '#64748b';
